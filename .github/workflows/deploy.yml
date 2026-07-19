@@ -1,39 +1,35 @@
-name: Build and Push Docker Image to Amazon ECR
+name: Deploy Docker App to EC2
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["Build and Push Docker Image to Amazon ECR"]
+    types:
+      - completed
 
 jobs:
-  build-and-push:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Deploy to EC2 using SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          host: 3.111.218.244
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+          script: |
+            aws ecr get-login-password --region ap-south-1 | docker login \
+              --username AWS \
+              --password-stdin 594474086887.dkr.ecr.ap-south-1.amazonaws.com
 
-      - name: Build Docker Image
-        run: |
-          docker build -t python-devops-app .
+            docker pull 594474086887.dkr.ecr.ap-south-1.amazonaws.com/python-devops-app:latest
 
-      - name: Tag Docker Image
-        run: |
-          docker tag python-devops-app:latest \
-          ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/python-devops-app:latest
+            docker rm -f python-devops-app || true
 
-      - name: Push Docker Image
-        run: |
-          docker push \
-          ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/python-devops-app:latest
+            docker run -d \
+              --restart unless-stopped \
+              --name python-devops-app \
+              -p 5000:5000 \
+              594474086887.dkr.ecr.ap-south-1.amazonaws.com/python-devops-app:latest
